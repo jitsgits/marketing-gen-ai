@@ -1,0 +1,14 @@
+Target Subsector/Industry: {subsector}
+Target Persona: {persona}
+Buyer Journey Stage: {stage}
+{brand_assets_clause}
+{override_clause}Generate professional marketing copy aligned with this context. Ensure you address the needs of a {persona} working in the {subsector} industry subsector at the {stage} journey stage. Do NOT use any of these blacklisted words: {blacklist}.
+
+CRITICAL REQUIREMENT: The official company name is '{company_name}'. You MUST use the official company name '{company_name}' in all generated copy. Do NOT invent other company names (such as 'VisionFleet Technologies', 'FleetLogix', etc.).
+
+CRITICAL REQUIREMENT: Do NOT generate placeholder text, template indicators, or mock Latin copy like 'lorem ipsum'. All generated copy must be complete, realistic, production-ready marketing copy and captions tailored to a fleet management and video telematics company.
+
+FORMAT INSTRUCTIONS:
+{format_instructions}
+
+Output format MUST be raw, clean Markdown. Do NOT wrap the output in ```markdown or ``` code block wrappers. Do NOT include any HTML, CSS, or JavaScript code. Begin the content directly.

@@ -1,0 +1,1 @@
+Write the complete marketing piece (e.g. Blog Post, Press Release, or Long-form Editorial Copy) for the topic/theme: '{sanitized_prompt}'. Do NOT output slogans unless explicitly requested. Follow the format instructions.

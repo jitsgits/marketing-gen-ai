@@ -13,6 +13,25 @@ from google.genai import types as genai_types
 logger = logging.getLogger("agent")
 logging.basicConfig(level=logging.INFO)
 
+
+def get_genai_client() -> genai.Client:
+    """
+    Get a genai.Client initialized for Vertex AI.
+    Tries the modern default constructor (which works on GCP Cloud Run using local metadata),
+    and falls back to explicit project/location environment variables for local Docker setups.
+    """
+    try:
+        return genai.Client(vertexai=True)
+    except Exception as e:
+        logger.info(f"Default client init failed ({e}). Falling back to explicit env values.")
+        project_id = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
+        location = os.getenv("GCP_LOCATION", "us-central1")
+        return genai.Client(
+            vertexai=True,
+            project=project_id,
+            location=location
+        )
+
 # Define State
 class AgentState(TypedDict):
     campaign_id: str
@@ -63,62 +82,6 @@ def sanitize_input_node(state: AgentState) -> dict:
     logger.info(f"Sanitization complete. Violations detected: {violations}")
     return {"sanitized_prompt": sanitized_prompt}
 
-# Node 1.5: Generate Pre-Approved Slogans/Captions
-def generate_captions_node(state: AgentState) -> dict:
-    logger.info("Executing generate_captions_node...")
-    subsector = state.get("subsector", "Trucking & Local")
-    persona = state.get("persona", "Fleet Safety Manager")
-    stage = state.get("stage", "Awareness")
-    sanitized_prompt = state.get("sanitized_prompt", "")
-    
-    project_id = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
-    location = os.getenv("GCP_LOCATION", "us-central1")
-    
-    system_instruction = (
-        f"You are a professional copywriting assistant for a video telematics and fleet management company.\n"
-        f"Target Subsector: {subsector}\n"
-        f"Target Persona: {persona}\n"
-        f"Buyer Journey: {stage}\n\n"
-        f"Generate a JSON array containing exactly 8 to 10 short, catchy, professional marketing slogans or captions in English (US). "
-        f"These will be overlaid on banners, social media cards, and slide backgrounds. "
-        f"Ensure they are highly relevant to the campaign prompt: '{sanitized_prompt}'. "
-        f"All captions must be in correct English. Avoid generic slogans and do not include any placeholder text."
-    )
-    
-    try:
-        client = genai.Client(
-            vertexai=True,
-            project=project_id,
-            location=location
-        )
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents="Generate the captions JSON array.",
-            config=genai_types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.7,
-                response_mime_type="application/json"
-            )
-        )
-        captions = json.loads(response.text)
-        if isinstance(captions, dict) and "captions" in captions:
-            captions = captions["captions"]
-        elif not isinstance(captions, list):
-            captions = []
-            
-        logger.info(f"Generated pre-approved captions: {captions}")
-        return {"marketing_captions": captions}
-    except Exception as e:
-        logger.warning(f"Failed to generate captions: {e}. Falling back to default list.")
-        default_captions = [
-            "Empower Your Fleet",
-            "Safety in Motion",
-            "Smart Video Telematics",
-            "Drive Efficiency, Protect Drivers",
-            "Proactive Driver Coaching",
-            "Real-Time Insights, True Protection"
-        ]
-        return {"marketing_captions": default_captions}
 
 # ----------------- TEXT GENERATION NODES -----------------
 
@@ -148,50 +111,42 @@ def _generate_text(state: AgentState, format_instructions: str) -> str:
     except Exception as format_err:
         logger.error(f"Failed to format instructions template with company name: {format_err}")
         
-    system_instruction = (
-        f"Target Subsector/Industry: {subsector}\n"
-        f"Target Persona: {persona}\n"
-        f"Buyer Journey Stage: {stage}\n"
-    )
-    if selected_asset_tags:
-        system_instruction += f"Selected Brand Asset Tags: {', '.join(selected_asset_tags)}\n"
-    system_instruction += "\n"
+    brand_assets_clause = f"Selected Brand Asset Tags: {', '.join(selected_asset_tags)}\n" if selected_asset_tags else ""
+    override_clause = f"{system_prompt_override}\n\n" if system_prompt_override else ""
     
-    if system_prompt_override:
-        system_instruction += f"{system_prompt_override}\n\n"
-        
-    system_instruction += (
-        f"Generate professional marketing copy aligned with this context. "
-        f"Ensure you address the needs of a {persona} working in the {subsector} industry subsector at the {stage} journey stage. "
-        f"Do NOT use any of these blacklisted words: {', '.join(blacklist)}.\n\n"
-        f"CRITICAL REQUIREMENT: The official company name is '{company_name}'. You MUST use the official company name '{company_name}' in all generated copy. Do NOT invent other company names (such as 'VisionFleet Technologies', 'FleetLogix', etc.).\n\n"
-        f"CRITICAL REQUIREMENT: Do NOT generate placeholder text, template indicators, or mock Latin copy like 'lorem ipsum'. "
-        f"All generated copy must be complete, realistic, production-ready marketing copy and captions tailored to a fleet management and video telematics company.\n\n"
-        f"FORMAT INSTRUCTIONS:\n{format_instructions}\n"
-        f"Output format MUST be raw, clean Markdown. Do NOT wrap the output in ```markdown or ``` code block wrappers. Do NOT include any HTML, CSS, or JavaScript code. Begin the content directly."
+    system_instruction_template = _load_prompt("text_generation_system.txt")
+    system_instruction = system_instruction_template.format(
+        subsector=subsector,
+        persona=persona,
+        stage=stage,
+        brand_assets_clause=brand_assets_clause,
+        override_clause=override_clause,
+        blacklist=', '.join(blacklist),
+        company_name=company_name,
+        format_instructions=format_instructions
     )
-    
-    project_id = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
-    location = os.getenv("GCP_LOCATION", "us-central1")
     
     try:
-        client = genai.Client(
-            vertexai=True,
-            project=project_id,
-            location=location
-        )
+        client = get_genai_client()
+        generation_prompt_template = _load_prompt("text_generation_prompt.txt")
+        generation_prompt = generation_prompt_template.format(sanitized_prompt=sanitized_prompt)
+        
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=f"Write the complete marketing piece (e.g. Blog Post, Press Release, or Long-form Editorial Copy) for the topic/theme: '{sanitized_prompt}'. Do NOT output slogans unless explicitly requested. Follow the format instructions.",
+            model="gemini-3.5-flash",
+            contents=generation_prompt,
             config=genai_types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                temperature=0.7
+                temperature=0.7,
+                thinking_config=genai_types.ThinkingConfig(
+                    thinking_level="MEDIUM"
+                )
             )
         )
         return response.text
     except Exception as e:
         logger.warning(f"Failed to use Gemini model gateway via GenAI SDK: {e}. Falling back to mock.")
-        return f"## [Mock Content]\n\n{format_instructions}\n\nTopic: {sanitized_prompt}"
+        mock_fallback = _load_prompt("mock_text_fallback.txt")
+        return mock_fallback
 
 def _load_prompt(filename: str) -> str:
     prompt_path = os.path.join(os.path.dirname(__file__), "prompts", filename)
@@ -228,9 +183,6 @@ def generate_captions_node(state: AgentState) -> dict:
     stage = state.get("stage", "Awareness")
     sanitized_prompt = state.get("sanitized_prompt", "")
     
-    project_id = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
-    location = os.getenv("GCP_LOCATION", "us-central1")
-    
     try:
         system_instruction_template = _load_prompt("generate_captions.txt")
         system_instruction = system_instruction_template.format(
@@ -240,18 +192,17 @@ def generate_captions_node(state: AgentState) -> dict:
             sanitized_prompt=sanitized_prompt
         )
         
-        client = genai.Client(
-            vertexai=True,
-            project=project_id,
-            location=location
-        )
+        client = get_genai_client()
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             contents="Generate the captions JSON array.",
             config=genai_types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 temperature=0.7,
-                response_mime_type="application/json"
+                response_mime_type="application/json",
+                thinking_config=genai_types.ThinkingConfig(
+                    thinking_level="MEDIUM"
+                )
             )
         )
         captions = json.loads(response.text)
@@ -284,16 +235,17 @@ def _generate_image(state: AgentState, aspect_ratio: str, width: int, height: in
     captions = state.get("marketing_captions") or []
     
     matched_assets = []
-    brand_colors_str = ""
-    brand_fonts_str = ""
-    logo_gcs_url = ""
-    company_name = "FleetVid"
-    
+    brand_colors_str = "corporate brand colors"
     try:
         with SessionLocalSync() as session:
             gov = session.query(BrandGovernanceConstraint).filter(BrandGovernanceConstraint.id == 1).first()
             if gov:
-                brand_colors_str = f"Primary colors: {', '.join(gov.primary_colors or [])}. Secondary colors: {', '.join(gov.secondary_colors or [])}."
+                # Omit raw hex codes in the prompt to prevent Imagen from writing them as text
+                colors = [c for c in (gov.primary_colors or []) + (gov.secondary_colors or []) if not c.startswith("#")]
+                if colors:
+                    brand_colors_str = f"brand colors: {', '.join(colors)}"
+                else:
+                    brand_colors_str = "brand colors"
                 brand_fonts_str = f"Heading fonts: {', '.join(gov.allowed_heading_fonts or [])}. Body fonts: {', '.join(gov.allowed_body_fonts or [])}."
                 logo_gcs_url = gov.logo_gcs_url or ""
                 company_name = getattr(gov, "company_name", "FleetVid")
@@ -307,7 +259,17 @@ def _generate_image(state: AgentState, aspect_ratio: str, width: int, height: in
     except Exception as db_err:
         logger.error(f"Failed to query brand assets or guidelines in agent: {db_err}")
         
-    composition_details = " \n".join([f"- Include a {a.category} ({a.name}, tags: {', '.join(a.tags or [])})" for a in matched_assets])
+    # Describe matched assets in natural language, omitting raw instructions or DB metadata
+    descriptions = []
+    for a in matched_assets:
+        clean_tags = [t for t in (a.tags or []) if len(t) < 30 and not any(k in t.lower() for k in ["overlay", "placement", "http", "gcs"])]
+        clean_name = a.name
+        if clean_name:
+            if clean_tags:
+                descriptions.append(f"a {a.category} representing '{clean_name}' (associated with: {', '.join(clean_tags)})")
+            else:
+                descriptions.append(f"a {a.category} representing '{clean_name}'")
+    composition_details = " \n".join([f"- {desc}" for desc in descriptions])
     
     # Assign unique slogans to each image type from the generated list
     caption_index = 0
@@ -337,17 +299,9 @@ def _generate_image(state: AgentState, aspect_ratio: str, width: int, height: in
             f" The image must display the text '{caption_text}' clearly visible on a signboard, screen, or vehicle."
         )
 
-    logo_clause = ""
-    if logo_gcs_url:
-        logo_clause = (
-            f" The image should incorporate the corporate logo located at '{logo_gcs_url}' naturally on a vehicle, device screen, or layout overlay. "
-            f"CRITICAL REQUIREMENT: Do NOT invent or generate any random new logos, branding shapes, or brand symbols. "
-            f"Use ONLY the corporate logo provided at '{logo_gcs_url}' for branding overlays."
-        )
-    else:
-        logo_clause = " CRITICAL REQUIREMENT: Do NOT invent or generate any random new logos, branding shapes, or brand symbols on the vehicles, devices, or layout overlays."
-        
-    company_clause = f" The brand name is '{company_name}'. Brand markings on vehicles, signboards, or interfaces should display '{company_name}'."
+    # Instruct Imagen to avoid generating any brand logos or symbols to prevent mismatching and messy random logo generations.
+    logo_clause = " CRITICAL REQUIREMENT: Do NOT generate or paint any brand logos, corporate symbols, or emblem graphics on the vehicles, screens, or layout overlays. Keep all surfaces clean and free of branding graphics."
+    company_clause = f" It is acceptable to display the company name '{company_name}' in simple black typographic lettering on signboards, vehicles, or screens in the scene."
 
     base_rules_template = _load_prompt("image_base_rules.txt")
     base_rules = base_rules_template.format(brand_colors_str=brand_colors_str)
@@ -360,14 +314,7 @@ def _generate_image(state: AgentState, aspect_ratio: str, width: int, height: in
     logger.info(f"Generating image [{image_type}] with prompt: {base_prompt[:300]}...")
     
     try:
-        project_id = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
-        location = os.getenv("GCP_LOCATION", "us-central1")
-        
-        client = genai.Client(
-            vertexai=True,
-            project=project_id,
-            location=location
-        )
+        client = get_genai_client()
         
         import time
         max_retries = 3
@@ -376,7 +323,7 @@ def _generate_image(state: AgentState, aspect_ratio: str, width: int, height: in
         for attempt in range(max_retries):
             try:
                 response = client.models.generate_images(
-                    model="imagen-3.0-generate-002",
+                    model="imagen-4.0-generate-001",
                     prompt=base_prompt,
                     config=genai_types.GenerateImagesConfig(
                         number_of_images=1,
@@ -398,6 +345,9 @@ def _generate_image(state: AgentState, aspect_ratio: str, width: int, height: in
         # Extract PNG bytes from the response
         img_data = response.generated_images[0]
         image_bytes = img_data.image.image_bytes
+        if not image_bytes:
+            logger.warning(f"No image bytes returned for {mock_label} (possibly filtered by safety filters).")
+            return None
         logger.info(f"Successfully generated Imagen image for {mock_label}, size={len(image_bytes)} bytes")
         return image_bytes
     except Exception as e:

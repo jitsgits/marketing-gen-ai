@@ -6,6 +6,7 @@ import asyncio
 import time
 import io
 from typing import List
+from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, status, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,6 +38,21 @@ logging.basicConfig(level=logging.INFO)
 
 # Initialize OpenTelemetry Tracer
 tracer = init_telemetry("marketing-genai-api")
+
+def get_genai_client():
+    from google import genai
+    try:
+        return genai.Client(vertexai=True)
+    except Exception as e:
+        logger.info(f"Default client init failed ({e}). Falling back to explicit env values.")
+        project_id = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
+        location = os.getenv("GCP_LOCATION", "us-central1")
+        return genai.Client(
+            vertexai=True,
+            project=project_id,
+            location=location
+        )
+
 
 pubsub_broker = PubSubBroker()
 
@@ -663,23 +679,24 @@ async def generate_campaign_assets(campaign_id: str):
             # Helper to run Vertex AI Imagen or fallback mock
             def run_imagen(aspect_ratio: str, width: int, height: int, mock_label: str) -> bytes:
                 try:
-                    import vertexai
-                    from vertexai.preview.vision_models import ImageGenerationModel
-                    project_id = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
-                    location = os.getenv("GCP_LOCATION", "us-central1")
-                    vertexai.init(project=project_id, location=location)
-                    
-                    model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-002")
-                    images = model.generate_images(
+                    from google.genai import types as genai_types
+                    client = get_genai_client()
+                    response = client.models.generate_images(
+                        model="imagen-4.0-generate-001",
                         prompt=f"{mock_label} marketing banner. {base_prompt}",
-                        number_of_images=1,
-                        aspect_ratio=aspect_ratio,
-                        guidance_scale=15.0
+                        config=genai_types.GenerateImagesConfig(
+                            number_of_images=1,
+                            aspect_ratio=aspect_ratio,
+                            guidance_scale=15.0,
+                            output_mime_type="image/png",
+                            person_generation="DONT_ALLOW",
+                            safety_filter_level="block_medium_and_above"
+                        )
                     )
-                    import io
-                    buf = io.BytesIO()
-                    images[0].save(buf, format="PNG")
-                    return buf.getvalue()
+                    image_bytes = response.generated_images[0].image.image_bytes
+                    if not image_bytes:
+                        raise Exception("No image bytes returned (possibly filtered by safety filters)")
+                    return image_bytes
                 except Exception as e:
                     logger.warning(f"Vertex AI Imagen call failed: {e}. Falling back to standard fidelity Pillow drawing.")
                     from PIL import Image, ImageDraw, ImageFont
@@ -775,7 +792,17 @@ async def regenerate_campaign_asset(campaign_id: str, request_data: AssetRegener
                 if any(tag in campaign_tags for tag in asset_tags):
                     matched_assets.append(asset)
                     
-            composition_details = " \n".join([f"- Use reference {a.category} asset named '{a.name}' (URL: {a.gcs_url}, tags: {a.tags})" for a in matched_assets])
+            # Describe matched assets in natural language, omitting raw instructions or DB metadata
+            descriptions = []
+            for a in matched_assets:
+                clean_tags = [t for t in (a.tags or []) if len(t) < 30 and not any(k in t.lower() for k in ["overlay", "placement", "http", "gcs"])]
+                clean_name = a.name
+                if clean_name:
+                    if clean_tags:
+                        descriptions.append(f"a {a.category} representing '{clean_name}' (associated with: {', '.join(clean_tags)})")
+                    else:
+                        descriptions.append(f"a {a.category} representing '{clean_name}'")
+            composition_details = " \n".join([f"- {desc}" for desc in descriptions])
             
             # Load slogans from the database
             captions = []
@@ -825,20 +852,17 @@ async def regenerate_campaign_asset(campaign_id: str, request_data: AssetRegener
             logo_gcs_url = gov.logo_gcs_url
             company_name = getattr(gov, "company_name", "FleetVid")
             
-            logo_clause = ""
-            if logo_gcs_url:
-                logo_clause = (
-                    f" The image should incorporate the corporate logo located at '{logo_gcs_url}' naturally on a vehicle, device screen, or layout overlay. "
-                    f"CRITICAL REQUIREMENT: Do NOT invent or generate any random new logos, branding shapes, or brand symbols. "
-                    f"Use ONLY the corporate logo provided at '{logo_gcs_url}' for branding overlays."
-                )
-            else:
-                logo_clause = " CRITICAL REQUIREMENT: Do NOT invent or generate any random new logos, branding shapes, or brand symbols on the vehicles, devices, or layout overlays."
-                
-            company_clause = f" The brand name is '{company_name}'. Brand markings on vehicles, signboards, or interfaces should display '{company_name}'."
+            # Instruct Imagen to avoid generating any brand logos or symbols to prevent mismatching and messy random logo generations.
+            logo_clause = " CRITICAL REQUIREMENT: Do NOT generate or paint any brand logos, corporate symbols, or emblem graphics on the vehicles, screens, or layout overlays. Keep all surfaces clean and free of branding graphics."
+            company_clause = f" It is acceptable to display the company name '{company_name}' in simple black typographic lettering on signboards, vehicles, or screens in the scene."
             
+            # Omit raw hex codes in the prompt to prevent Imagen from writing them as text
+            colors = [c for c in (gov.primary_colors or []) + (gov.secondary_colors or []) if not c.startswith("#")]
+            if colors:
+                brand_colors_str = f"brand colors: {', '.join(colors)}"
+            else:
+                brand_colors_str = "brand colors"
             base_rules_template = _load_prompt("image_base_rules.txt")
-            brand_colors_str = f"Primary colors: {', '.join(gov.primary_colors or [])}. Secondary colors: {', '.join(gov.secondary_colors or [])}."
             base_rules = base_rules_template.format(brand_colors_str=brand_colors_str)
             
             original_prompt = f"{scene}{caption_clause}{logo_clause}{company_clause}\n{base_rules}"
@@ -850,10 +874,7 @@ async def regenerate_campaign_asset(campaign_id: str, request_data: AssetRegener
                 try:
                     from google import genai
                     from google.genai import types as genai_types
-                    project_id = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
-                    location = os.getenv("GCP_LOCATION", "us-central1")
-                    
-                    client = genai.Client(vertexai=True, project=project_id, location=location)
+                    client = get_genai_client()
                     refine_instruction = (
                         "You are an expert prompt engineer for Imagen 3.0. "
                         "You refine existing image generation prompts based on user feedback. "
@@ -890,12 +911,9 @@ async def regenerate_campaign_asset(campaign_id: str, request_data: AssetRegener
                 try:
                     from google import genai
                     from google.genai import types as genai_types
-                    project_id = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
-                    location = os.getenv("GCP_LOCATION", "us-central1")
-                    
-                    client = genai.Client(vertexai=True, project=project_id, location=location)
+                    client = get_genai_client()
                     response = client.models.generate_images(
-                        model="imagen-3.0-generate-002",
+                        model="imagen-4.0-generate-001",
                         prompt=final_prompt,
                         config=genai_types.GenerateImagesConfig(
                             number_of_images=1,
@@ -907,6 +925,9 @@ async def regenerate_campaign_asset(campaign_id: str, request_data: AssetRegener
                         )
                     )
                     image_bytes = response.generated_images[0].image.image_bytes
+                    if not image_bytes:
+                        logger.warning(f"No image bytes returned for {mock_label} (possibly filtered by safety filters).")
+                        raise Exception("No image bytes returned (possibly filtered by safety filters)")
                     logger.info(f"Successfully regenerated Imagen image for {mock_label}, size={len(image_bytes)} bytes")
                     return image_bytes
                 except Exception as e:
@@ -941,25 +962,31 @@ async def regenerate_campaign_asset(campaign_id: str, request_data: AssetRegener
             if old_url:
                 logger.info(f"Deleting old GCS image for type '{image_type}': {old_url}")
                 storage_broker.delete_artifact(old_url)
+                if old_url.endswith(".png"):
+                    storage_broker.delete_artifact(old_url.replace(".png", "_raw.png"))
                 
             if image_type == "blog_hero":
                 new_bytes = run_imagen("16:9", 1408, 768, "Blog/PR Hero Image")
+                storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/blog_hero_raw.png", new_bytes, "image/png")
                 new_url = storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/blog_hero.png", new_bytes, "image/png")
                 db_campaign.blog_hero_gcs_url = new_url
                 db_campaign.banner_gcs_url = new_url
                 db_campaign.blog_hero_status = "completed"
             elif image_type == "editorial":
                 new_bytes = run_imagen("4:3", 1280, 896, "Inline Editorial Image")
+                storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/editorial_raw.png", new_bytes, "image/png")
                 new_url = storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/editorial.png", new_bytes, "image/png")
                 db_campaign.editorial_gcs_url = new_url
                 db_campaign.editorial_status = "completed"
             elif image_type == "slide_background":
                 new_bytes = run_imagen("16:9", 1408, 768, "PowerPoint Widescreen Background")
+                storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/slide_background_raw.png", new_bytes, "image/png")
                 new_url = storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/slide_background.png", new_bytes, "image/png")
                 db_campaign.slide_background_gcs_url = new_url
                 db_campaign.slide_background_status = "completed"
             elif image_type == "content_card":
                 new_bytes = run_imagen("1:1", 1024, 1024, "Grid/Column Content Card")
+                storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/content_card_raw.png", new_bytes, "image/png")
                 new_url = storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/content_card.png", new_bytes, "image/png")
                 db_campaign.content_card_gcs_url = new_url
                 db_campaign.content_card_status = "completed"
@@ -995,6 +1022,8 @@ async def delete_campaign(campaign_id: str):
                 if url:
                     try:
                         storage_broker.delete_artifact(url)
+                        if url.endswith(".png"):
+                            storage_broker.delete_artifact(url.replace(".png", "_raw.png"))
                     except Exception as e:
                         logger.error(f"Failed deleting GCS artifact {url} during campaign deletion: {e}")
                         
@@ -1007,6 +1036,149 @@ async def delete_campaign(campaign_id: str):
     except Exception as e:
         logger.error(f"Failed deleting campaign {campaign_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+class LogoOverlayRequest(BaseModel):
+    image_type: str
+    position: str
+
+@app.post("/api/v1/campaigns/{campaign_id}/overlay-logo")
+async def overlay_campaign_logo(campaign_id: str, request_data: LogoOverlayRequest):
+    image_type = request_data.image_type
+    position = request_data.position
+    
+    if image_type not in ["blog_hero", "editorial", "slide_background", "content_card"]:
+        raise HTTPException(status_code=400, detail="Invalid image_type.")
+        
+    if position not in ["top_left", "top_right", "bottom_left", "bottom_right"]:
+        raise HTTPException(status_code=400, detail="Invalid position. Must be top_left, top_right, bottom_left, or bottom_right.")
+        
+    try:
+        async with SessionLocalAsync() as session:
+            # 1. Fetch Campaign
+            result = await session.execute(
+                select(Campaign).where(Campaign.campaign_id == campaign_id)
+            )
+            db_campaign = result.scalars().first()
+            if not db_campaign:
+                raise HTTPException(status_code=404, detail="Campaign not found.")
+                
+            # 2. Fetch Brand Governance Logo URL
+            gov_res = await session.execute(
+                select(BrandGovernanceConstraint).where(BrandGovernanceConstraint.id == 1)
+            )
+            gov = gov_res.scalars().first()
+            if not gov or not gov.logo_gcs_url:
+                raise HTTPException(status_code=400, detail="Brand logo is not configured in Settings.")
+            logo_url = gov.logo_gcs_url
+            company_name = getattr(gov, "company_name", "FleetVid")
+            
+            # 3. Resolve Image GCS URL
+            image_url = None
+            if image_type == "blog_hero":
+                image_url = db_campaign.blog_hero_gcs_url
+            elif image_type == "editorial":
+                image_url = db_campaign.editorial_gcs_url
+            elif image_type == "slide_background":
+                image_url = db_campaign.slide_background_gcs_url
+            elif image_type == "content_card":
+                image_url = db_campaign.content_card_gcs_url
+                
+            if not image_url:
+                raise HTTPException(status_code=400, detail=f"Image of type '{image_type}' has not been generated yet.")
+                
+            # 4. Download main image and logo
+            storage_broker = StorageBroker()
+            # Try to fetch the true raw copy first to avoid accumulating multiple logos
+            raw_url = image_url.replace(".png", "_raw.png") if image_url.endswith(".png") else image_url
+            main_image_bytes = storage_broker.download_binary_artifact(raw_url)
+            if not main_image_bytes:
+                logger.warning(f"Raw image {raw_url} not found. Falling back to active display image {image_url}")
+                main_image_bytes = storage_broker.download_binary_artifact(image_url)
+                
+            logo_bytes = storage_broker.download_binary_artifact(logo_url)
+            
+            if not main_image_bytes:
+                raise HTTPException(status_code=400, detail="Could not read the main image from storage.")
+            if not logo_bytes:
+                raise HTTPException(status_code=400, detail="Could not read the brand logo image from storage.")
+                
+            # 5. Perform PIL overlay
+            from PIL import Image
+            import io
+            
+            # Open images
+            main_img = Image.open(io.BytesIO(main_image_bytes)).convert("RGBA")
+            logo_img = Image.open(io.BytesIO(logo_bytes)).convert("RGBA")
+            
+            main_w, main_h = main_img.size
+            
+            # Scale logo: Let's make the logo width equal to 12% of the main image width
+            target_width = int(main_w * 0.12)
+            # Maintain aspect ratio
+            logo_w, logo_h = logo_img.size
+            target_height = int((target_width / logo_w) * logo_h)
+            
+            # Prevent logo from being too tiny or too huge
+            target_width = max(60, min(target_width, 300))
+            target_height = int((target_width / logo_w) * logo_h)
+            
+            logo_img_resized = logo_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+            
+            # Calculate coordinates with 3% margin
+            margin_x = int(main_w * 0.03)
+            margin_y = int(main_h * 0.03)
+            
+            if position == "top_left":
+                x = margin_x
+                y = margin_y
+            elif position == "top_right":
+                x = main_w - target_width - margin_x
+                y = margin_y
+            elif position == "bottom_left":
+                x = margin_x
+                y = main_h - target_height - margin_y
+            else: # bottom_right
+                x = main_w - target_width - margin_x
+                y = main_h - target_height - margin_y
+                
+            # Paste the logo with its alpha channel as a mask for perfect transparency support
+            canvas = Image.new("RGBA", main_img.size)
+            canvas.paste(main_img, (0, 0))
+            canvas.paste(logo_img_resized, (x, y), mask=logo_img_resized)
+            
+            # Save back to PNG bytes
+            out_buf = io.BytesIO()
+            canvas.save(out_buf, format="PNG")
+            new_image_bytes = out_buf.getvalue()
+            
+            # 6. Upload back to GCS (overwriting)
+            prefix = f"https://storage.googleapis.com/{storage_broker.bucket_name}/"
+            file_path = image_url.replace(prefix, "") if image_url.startswith(prefix) else f"campaigns/{campaign_id}/{image_type}.png"
+            
+            if image_url.startswith("file://"):
+                file_path = image_url.replace("file://", "")
+                
+            new_url = storage_broker.upload_binary_artifact(file_path, new_image_bytes, "image/png")
+            
+            # Update DB GCS URLs (force png extension in database)
+            if image_type == "blog_hero":
+                db_campaign.blog_hero_gcs_url = new_url
+                db_campaign.banner_gcs_url = new_url
+            elif image_type == "editorial":
+                db_campaign.editorial_gcs_url = new_url
+            elif image_type == "slide_background":
+                db_campaign.slide_background_gcs_url = new_url
+            elif image_type == "content_card":
+                db_campaign.content_card_gcs_url = new_url
+                
+            await session.commit()
+            return {"image_url": new_url}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to overlay logo on campaign {campaign_id} image {image_type}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to overlay logo: {str(e)}")
 
 @app.post("/api/v1/campaigns/{campaign_id}/regenerate-text")
 async def regenerate_campaign_text(campaign_id: str, request_data: TextRegenerateRequest):
@@ -1140,10 +1312,7 @@ async def regenerate_campaign_text(campaign_id: str, request_data: TextRegenerat
             try:
                 from google import genai
                 from google.genai import types as genai_types
-                project_id = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
-                location = os.getenv("GCP_LOCATION", "us-central1")
-                
-                client = genai.Client(vertexai=True, project=project_id, location=location)
+                client = get_genai_client()
                 response = client.models.generate_content(
                     model="gemini-2.5-flash",
                     contents=contents,

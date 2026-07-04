@@ -21,6 +21,7 @@ services:
       - "8000:8000"
     environment:
       - GCP_PROJECT=${GCP_PROJECT:-marketing-genai-project}
+      - GOOGLE_CLOUD_PROJECT=${GCP_PROJECT:-marketing-genai-project}
       - GCP_LOCATION=${GCP_LOCATION:-us-central1}
       - GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-marketing-genai-gcs-default}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
@@ -39,6 +40,7 @@ services:
     command: python -m app.worker
     environment:
       - GCP_PROJECT=${GCP_PROJECT:-marketing-genai-project}
+      - GOOGLE_CLOUD_PROJECT=${GCP_PROJECT:-marketing-genai-project}
       - GCP_LOCATION=${GCP_LOCATION:-us-central1}
       - GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-marketing-genai-gcs-default}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json

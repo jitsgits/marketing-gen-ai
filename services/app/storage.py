@@ -142,3 +142,38 @@ class StorageBroker:
         except Exception as e:
             logger.error(f"Failed to read GCS file {gcs_url_or_path}: {e}")
         return ""
+
+    def download_binary_artifact(self, gcs_url_or_path: str) -> bytes:
+        """
+        Downloads binary content (e.g. image) from GCS URL or local mock path.
+        """
+        if not gcs_url_or_path:
+            return b""
+        if self.use_mock or gcs_url_or_path.startswith("file://"):
+            try:
+                local_path = gcs_url_or_path.replace("file://", "")
+                if os.path.exists(local_path):
+                    with open(local_path, "rb") as f:
+                        return f.read()
+            except Exception as e:
+                logger.error(f"Failed to read mock binary file {gcs_url_or_path}: {e}")
+            return b""
+
+        try:
+            prefix = f"https://storage.googleapis.com/{self.bucket_name}/"
+            if gcs_url_or_path.startswith(prefix):
+                file_path = gcs_url_or_path.replace(prefix, "")
+                blob = self._get_blob(file_path)
+                if blob.exists():
+                    return blob.download_as_bytes()
+            elif gcs_url_or_path.startswith("https://storage.googleapis.com/"):
+                parts = gcs_url_or_path.replace("https://storage.googleapis.com/", "").split("/", 1)
+                if len(parts) == 2:
+                    bucket_name, file_path = parts
+                    bucket = Bucket(self.storage_client, bucket_name)
+                    blob = bucket.blob(file_path)
+                    if blob.exists():
+                        return blob.download_as_bytes()
+        except Exception as e:
+            logger.error(f"Failed to read GCS binary file {gcs_url_or_path}: {e}")
+        return b""

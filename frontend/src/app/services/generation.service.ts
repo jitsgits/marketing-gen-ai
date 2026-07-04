@@ -290,4 +290,14 @@ export class GenerationService {
   updateTextArtifact(campaignId: string, artifactType: string, content: string): Observable<any> {
     return this.http.put(`${this.apiUrl}/campaigns/${campaignId}/artifacts/${artifactType}`, { content });
   }
+
+  /**
+   * Overlay logo on campaign image at a specific corner
+   */
+  overlayLogo(campaignId: string, imageType: string, position: string): Observable<{ image_url: string }> {
+    return this.http.post<{ image_url: string }>(
+      `${this.apiUrl}/campaigns/${campaignId}/overlay-logo`,
+      { image_type: imageType, position: position }
+    );
+  }
 }

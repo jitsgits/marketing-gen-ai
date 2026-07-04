@@ -301,6 +301,32 @@ type GenerationState = 'idle' | 'loading' | 'completed' | 'error';
                   </div>
                 </div>
                 
+                <!-- LOGO OVERLAY CONTROL PANEL -->
+                <div *ngIf="campaignStage !== 'Generated' && activeGcsUrl" class="mb-3 p-3 bg-slate-900/90 border border-slate-800 rounded-xl flex items-center justify-between text-xs text-slate-300 gap-4">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-indigo-400">🛡️ Logo Overlay:</span>
+                    <span class="text-slate-400">Select corner to stamp corporate logo:</span>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <label class="flex items-center gap-1 cursor-pointer">
+                      <input type="radio" name="logo_pos" [(ngModel)]="logoPosition" value="top_left" class="accent-indigo-500"> TL
+                    </label>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                      <input type="radio" name="logo_pos" [(ngModel)]="logoPosition" value="top_right" class="accent-indigo-500"> TR
+                    </label>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                      <input type="radio" name="logo_pos" [(ngModel)]="logoPosition" value="bottom_left" class="accent-indigo-500"> BL
+                    </label>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                      <input type="radio" name="logo_pos" [(ngModel)]="logoPosition" value="bottom_right" class="accent-indigo-500"> BR
+                    </label>
+                    <button type="button" (click)="applyLogoOverlay()" [disabled]="isApplyingLogo || getStatus(activeTabObj.statusKey) === 'generating'" class="ml-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg transition active:scale-95 flex items-center gap-1.5 focus:outline-none">
+                      <span *ngIf="isApplyingLogo" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                      {{ isApplyingLogo ? 'Applying...' : 'Apply Logo' }}
+                    </button>
+                  </div>
+                </div>
+
                 <div class="flex-1 bg-slate-900 overflow-hidden relative flex items-center justify-center rounded-xl border border-slate-800 group">
                    <img *ngIf="activeGcsUrl" [src]="activeGcsUrl" class="w-full h-full object-contain" alt="Preview" />
                    <div *ngIf="!activeGcsUrl && getStatus(activeTabObj.statusKey) === 'generating'" class="flex flex-col items-center text-slate-500 font-mono text-[10px]">
@@ -410,6 +436,10 @@ export class WorkspaceComponent implements OnInit {
   isSavingText = false;
   isGeneratingDocuments = false;
   isLoadingCampaign = false;
+   
+  // Logo Overlay Settings
+  logoPosition: string = 'bottom_right';
+  isApplyingLogo: boolean = false;
   
   // Tab Management
   visualTabs = [
@@ -664,6 +694,7 @@ export class WorkspaceComponent implements OnInit {
     this.isRegeneratingSingle = true;
     this.generationService.regenerateCampaignAsset(this.currentCampaignId, this.activeTab, this.refinementPrompt).subscribe({
       next: (res) => {
+        this.wsBuster = new Date().getTime();
         if (tab) {
           this.campaignData[tab.urlKey] = res.image_url;
           this.campaignData[tab.statusKey] = 'completed';
@@ -677,6 +708,35 @@ export class WorkspaceComponent implements OnInit {
           this.campaignData[tab.statusKey] = 'failed';
         }
         this.isRegeneratingSingle = false;
+      }
+    });
+  }
+
+  applyLogoOverlay(): void {
+    if (!this.currentCampaignId || this.isApplyingLogo || !this.isVisualTabActive() || !this.activeGcsUrl) return;
+    
+    const tab = this.visualTabs.find(t => t.id === this.activeTab);
+    if (tab) {
+      this.campaignData[tab.statusKey] = 'generating';
+    }
+    
+    this.isApplyingLogo = true;
+    this.generationService.overlayLogo(this.currentCampaignId, this.activeTab, this.logoPosition).subscribe({
+      next: (res) => {
+        this.wsBuster = new Date().getTime();
+        if (tab) {
+          this.campaignData[tab.urlKey] = res.image_url;
+          this.campaignData[tab.statusKey] = 'completed';
+        }
+        this.isApplyingLogo = false;
+      },
+      error: (err) => {
+        console.error('Failed to overlay logo', err);
+        alert('Failed to overlay logo: ' + (err.error?.detail || err.message));
+        if (tab) {
+          this.campaignData[tab.statusKey] = 'completed';
+        }
+        this.isApplyingLogo = false;
       }
     });
   }

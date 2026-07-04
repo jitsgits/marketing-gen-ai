@@ -165,6 +165,7 @@ def process_message_callback(message):
                     if "blog_hero_bytes" in state_update:
                         img_bytes = state_update["blog_hero_bytes"]
                         if img_bytes:
+                            storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/blog_hero_raw.png", img_bytes, "image/png")
                             url = storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/blog_hero.png", img_bytes, "image/png")
                             update_artifact_in_db("blog_hero_status", "completed", "blog_hero_gcs_url", url)
                         else:
@@ -173,6 +174,7 @@ def process_message_callback(message):
                     if "editorial_bytes" in state_update:
                         img_bytes = state_update["editorial_bytes"]
                         if img_bytes:
+                            storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/editorial_raw.png", img_bytes, "image/png")
                             url = storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/editorial.png", img_bytes, "image/png")
                             update_artifact_in_db("editorial_status", "completed", "editorial_gcs_url", url)
                         else:
@@ -181,6 +183,7 @@ def process_message_callback(message):
                     if "slide_background_bytes" in state_update:
                         img_bytes = state_update["slide_background_bytes"]
                         if img_bytes:
+                            storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/slide_background_raw.png", img_bytes, "image/png")
                             url = storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/slide_background.png", img_bytes, "image/png")
                             update_artifact_in_db("slide_background_status", "completed", "slide_background_gcs_url", url)
                         else:
@@ -189,6 +192,7 @@ def process_message_callback(message):
                     if "content_card_bytes" in state_update:
                         img_bytes = state_update["content_card_bytes"]
                         if img_bytes:
+                            storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/content_card_raw.png", img_bytes, "image/png")
                             url = storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/content_card.png", img_bytes, "image/png")
                             update_artifact_in_db("content_card_status", "completed", "content_card_gcs_url", url)
                         else:

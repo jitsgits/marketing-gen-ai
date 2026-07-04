@@ -4,3 +4,8 @@ Target Persona: {persona}
 Buyer Journey: {stage}
 
 Generate a JSON array containing exactly 8 to 10 short, catchy, professional marketing slogans or captions in English (US). These will be overlaid on banners, social media cards, and slide backgrounds. Ensure they are highly relevant to the campaign prompt: '{sanitized_prompt}'. All captions must be in correct English. Avoid generic slogans and do not include any placeholder text.
+
+To get crisp, un-garbled text for logos, ads, or posters, stick to Google’s official length guidelines:
+- Length per phrase: Maximum of 25 characters (including spaces).
+- Total phrases per image: Limit yourself to 2–3 distinct phrases maximum.
+- Word count sweet spot: Try to keep the total text inside the image under 5–7 words total.
