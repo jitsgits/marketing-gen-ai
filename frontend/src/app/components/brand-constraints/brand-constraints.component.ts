@@ -493,6 +493,17 @@ function exactFiveUniqueHexValidator(control: AbstractControl): ValidationErrors
       </div>
 
     </div>
+    <!-- Guardrails Check Overlay -->
+    <div *ngIf="isCheckingGuardrails" class="fixed bottom-6 right-6 bg-slate-900/95 border border-brand-500/50 rounded-xl px-4 py-3 shadow-2xl flex items-center gap-3 z-50 animate-bounce">
+      <div class="w-4 h-4 border-2 border-brand-500/20 border-t-brand-500 rounded-full animate-spin"></div>
+      <div class="flex flex-col">
+        <span class="text-xs font-bold text-slate-100 flex items-center gap-1">
+          <span>🛡️</span> Guardrails Check
+        </span>
+        <span class="text-[10px] text-slate-400">Verifying prompt security constraints...</span>
+      </div>
+    </div>
+
   `
 })
 export class BrandConstraintsComponent implements OnInit {
@@ -504,6 +515,7 @@ export class BrandConstraintsComponent implements OnInit {
   logoUrl: string | null = null;
   isUploadingLogo = false;
   isSaving = false;
+  isCheckingGuardrails = false;
   saveStatus: 'success' | 'error' | null = null;
 
   // Font chips
@@ -854,9 +866,11 @@ ${dontsStr}
       }
     };
 
+    this.isCheckingGuardrails = true;
     // Save Brand Governance Policies
     this.genService.updateBrandGovernance(govData).subscribe({
       next: () => {
+        this.isCheckingGuardrails = false;
         // Save Blacklist Words
         this.genService.updateBlacklist({ blacklist: this.blacklist }).subscribe({
           next: () => {
@@ -872,6 +886,7 @@ ${dontsStr}
         });
       },
       error: (err) => {
+        this.isCheckingGuardrails = false;
         console.error('Failed to save brand policies', err);
         this.isSaving = false;
         this.saveStatus = 'error';

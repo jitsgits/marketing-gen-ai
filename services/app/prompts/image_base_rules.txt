@@ -1,2 +1,2 @@
 Brand colors: {brand_colors_str}
-RULES: All visible text must be in English (US). No lorem ipsum. No gibberish characters.
+RULES: All visible text must be in English (US). No lorem ipsum. No gibberish characters. Do NOT write paragraphs, descriptions, or large blocks of text on the image. Do NOT let prompt instructions, theme keywords, vertical names, or persona details leak as text onto the graphic. Keep all surfaces clean and free of text. The ONLY text allowed on the image is the short headline/slogan specified in the caption rules, and it must be extremely minimal (at most 3-5 words). Less text is significantly better.

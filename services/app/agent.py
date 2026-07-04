@@ -32,6 +32,41 @@ def get_genai_client() -> genai.Client:
             location=location
         )
 
+def clean_prompt_topic(prompt: str) -> str:
+    if not prompt:
+        return ""
+    lines = prompt.splitlines()
+    cleaned_lines = []
+    exclude_keywords = [
+        "card", "1:1 square", "headline_slogan", "additional_text", "placement",
+        "company_name", "graphic_elements", "branding", "slogan", "typography"
+    ]
+    for line in lines:
+        line_strip = line.strip()
+        if not line_strip:
+            continue
+        line_lower = line_strip.lower()
+        if any(line_lower == kw or line_lower.startswith(kw + ":") or line_lower.startswith(kw + "_") for kw in exclude_keywords):
+            continue
+        if "typography" in line_lower or "no brand logos" in line_lower or "sans serif" in line_lower:
+            continue
+        cleaned_lines.append(line_strip)
+    
+    if cleaned_lines:
+        return " ".join(cleaned_lines)
+    return prompt.splitlines()[0] if prompt.splitlines() else prompt
+
+def sanitize_asset_tags(tags: list) -> list:
+    if not tags:
+        return []
+    exclude_tag_keywords = ["overlay", "placement", "http", "gcs", "slogan", "text", "branding", "card", "square", "company", "headline", "graphic"]
+    return [
+        t for t in tags
+        if len(str(t)) < 30
+        and not "_" in str(t)
+        and not any(k in str(t).lower() for k in exclude_tag_keywords)
+    ]
+
 # Define State
 class AgentState(TypedDict):
     campaign_id: str
@@ -240,10 +275,17 @@ def _generate_image(state: AgentState, aspect_ratio: str, width: int, height: in
         with SessionLocalSync() as session:
             gov = session.query(BrandGovernanceConstraint).filter(BrandGovernanceConstraint.id == 1).first()
             if gov:
-                # Omit raw hex codes in the prompt to prevent Imagen from writing them as text
-                colors = [c for c in (gov.primary_colors or []) + (gov.secondary_colors or []) if not c.startswith("#")]
-                if colors:
-                    brand_colors_str = f"brand colors: {', '.join(colors)}"
+                # Omit raw hex codes and complex CSS gradients from prompt to prevent them from leaking as text
+                clean_colors = []
+                for c in (gov.primary_colors or []) + (gov.secondary_colors or []):
+                    c_str = str(c).strip()
+                    if c_str.startswith("#"):
+                        continue
+                    if "(" in c_str or ")" in c_str or "," in c_str or "gradient" in c_str.lower() or len(c_str) > 20:
+                        continue
+                    clean_colors.append(c_str)
+                if clean_colors:
+                    brand_colors_str = f"brand colors: {', '.join(clean_colors)}"
                 else:
                     brand_colors_str = "brand colors"
                 brand_fonts_str = f"Heading fonts: {', '.join(gov.allowed_heading_fonts or [])}. Body fonts: {', '.join(gov.allowed_body_fonts or [])}."
@@ -262,7 +304,7 @@ def _generate_image(state: AgentState, aspect_ratio: str, width: int, height: in
     # Describe matched assets in natural language, omitting raw instructions or DB metadata
     descriptions = []
     for a in matched_assets:
-        clean_tags = [t for t in (a.tags or []) if len(t) < 30 and not any(k in t.lower() for k in ["overlay", "placement", "http", "gcs"])]
+        clean_tags = sanitize_asset_tags(a.tags)
         clean_name = a.name
         if clean_name:
             if clean_tags:
@@ -287,27 +329,42 @@ def _generate_image(state: AgentState, aspect_ratio: str, width: int, height: in
     # Load scene description from separate template file
     filename = f"image_{image_type}.txt"
     scene_template = _load_prompt(filename)
-    scene = scene_template.format(
-        prompt_topic=prompt_topic,
-        persona=persona,
-        subsector=subsector
-    )
+    if image_type == "slide_background":
+        scene = scene_template  # No placeholders to format in strict text-free slide template
+    else:
+        scene = scene_template.format(
+            prompt_topic=clean_prompt_topic(prompt_topic),
+            persona=persona,
+            subsector=subsector
+        )
     
     caption_clause = ""
-    if caption_text:
-        caption_clause = (
-            f" The image must display the text '{caption_text}' clearly visible on a signboard, screen, or vehicle."
-        )
+    if caption_text and image_type != "slide_background":
+        if image_type == "content_card":
+            caption_clause = (
+                f" The card must feature a clean, professional typography overlay displaying the short text: '{caption_text}'."
+            )
+        else:
+            caption_clause = (
+                f" The image must display the text '{caption_text}' clearly visible on a signboard, screen, or vehicle."
+            )
 
     # Instruct Imagen to avoid generating any brand logos or symbols to prevent mismatching and messy random logo generations.
     logo_clause = " CRITICAL REQUIREMENT: Do NOT generate or paint any brand logos, corporate symbols, or emblem graphics on the vehicles, screens, or layout overlays. Keep all surfaces clean and free of branding graphics."
-    company_clause = f" It is acceptable to display the company name '{company_name}' in simple black typographic lettering on signboards, vehicles, or screens in the scene."
+    
+    if image_type == "slide_background":
+        company_clause = ""
+    else:
+        company_clause = f" It is acceptable to display the company name '{company_name}' in simple black typographic lettering on signboards, vehicles, or screens in the scene."
 
-    base_rules_template = _load_prompt("image_base_rules.txt")
-    base_rules = base_rules_template.format(brand_colors_str=brand_colors_str)
+    if image_type == "slide_background":
+        base_rules = f"Brand colors: {brand_colors_str}\nCRITICAL RULES: All surfaces and layouts must be completely clean and free of text, letters, numbers, and symbols. Absolutely NO text overlays, slogans, or branding letters are permitted on this slide background."
+    else:
+        base_rules_template = _load_prompt("image_base_rules.txt")
+        base_rules = base_rules_template.format(brand_colors_str=brand_colors_str)
 
     base_prompt = f"{scene}{caption_clause}{logo_clause}{company_clause}\n{base_rules}"
-    if composition_details:
+    if composition_details and image_type != "slide_background":
         base_prompt += f"\nReference assets to incorporate: {composition_details}"
 
         

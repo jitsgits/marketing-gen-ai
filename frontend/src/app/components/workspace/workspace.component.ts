@@ -425,6 +425,17 @@ type GenerationState = 'idle' | 'loading' | 'completed' | 'error';
 
       </div>
     </div>
+    <!-- Guardrails Check Overlay -->
+    <div *ngIf="isCheckingGuardrails" class="fixed bottom-6 right-6 bg-slate-900/95 border border-brand-500/50 rounded-xl px-4 py-3 shadow-2xl flex items-center gap-3 z-50 animate-bounce">
+      <div class="w-4 h-4 border-2 border-brand-500/20 border-t-brand-500 rounded-full animate-spin"></div>
+      <div class="flex flex-col">
+        <span class="text-xs font-bold text-slate-100 flex items-center gap-1">
+          <span>🛡️</span> Guardrails Check
+        </span>
+        <span class="text-[10px] text-slate-400">Verifying prompt security constraints...</span>
+      </div>
+    </div>
+
   `
 })
 export class WorkspaceComponent implements OnInit {
@@ -449,6 +460,7 @@ export class WorkspaceComponent implements OnInit {
   isSavingText = false;
   isGeneratingDocuments = false;
   isLoadingCampaign = false;
+  isCheckingGuardrails = false;
    
   // Logo Overlay Settings
   logoPosition: string = 'bottom_right';
@@ -621,6 +633,7 @@ export class WorkspaceComponent implements OnInit {
   generateCreativeArtifacts(): void {
     if (!this.prompt.trim() || !this.campaignName.trim()) return;
 
+    this.isCheckingGuardrails = true;
     this.state.set('loading');
     this.errorMessage = '';
     this.campaignStage = 'Draft';
@@ -640,12 +653,14 @@ export class WorkspaceComponent implements OnInit {
 
     this.generationService.generate(requestPayload).subscribe({
       next: (campaign: CampaignStatus) => {
+        this.isCheckingGuardrails = false;
         this.currentCampaignId = campaign.campaign_id;
         // Update route with campaign_id
         this.router.navigate(['/wizard', campaign.campaign_id], { replaceUrl: true });
         this.connectWS(campaign.campaign_id);
       },
       error: (err) => {
+        this.isCheckingGuardrails = false;
         this.state.set('error');
         this.errorMessage = err.error?.detail || 'Failed to submit generation request.';
       }
@@ -705,6 +720,7 @@ export class WorkspaceComponent implements OnInit {
     }
     
     this.isRegeneratingSingle = true;
+    this.isCheckingGuardrails = true;
     this.generationService.regenerateCampaignAsset(this.currentCampaignId, this.activeTab, this.refinementPrompt).subscribe({
       next: (res) => {
         this.wsBuster = new Date().getTime();
@@ -714,6 +730,7 @@ export class WorkspaceComponent implements OnInit {
         }
         this.isRegeneratingSingle = false;
         this.refinementPrompt = '';
+        this.isCheckingGuardrails = false;
       },
       error: (err) => {
         console.error('Failed to regenerate single image template', err);
@@ -721,6 +738,7 @@ export class WorkspaceComponent implements OnInit {
           this.campaignData[tab.statusKey] = 'failed';
         }
         this.isRegeneratingSingle = false;
+        this.isCheckingGuardrails = false;
         alert('Image regeneration failed: ' + (err.error?.detail || err.message));
       }
     });
@@ -772,6 +790,7 @@ export class WorkspaceComponent implements OnInit {
     }
     
     this.isRegeneratingSingleText = true;
+    this.isCheckingGuardrails = true;
     this.generationService.regenerateCampaignText(this.currentCampaignId, this.activeTab, this.textRefinementPrompt).subscribe({
       next: (res) => {
         if (tab) {
@@ -782,6 +801,7 @@ export class WorkspaceComponent implements OnInit {
         this.activeTextContent = res.content;
         this.isRegeneratingSingleText = false;
         this.textRefinementPrompt = '';
+        this.isCheckingGuardrails = false;
       },
       error: (err) => {
         console.error('Failed to regenerate single text artifact', err);
@@ -789,6 +809,7 @@ export class WorkspaceComponent implements OnInit {
           this.campaignData[tab.statusKey] = 'failed';
         }
         this.isRegeneratingSingleText = false;
+        this.isCheckingGuardrails = false;
         alert('Text regeneration failed: ' + (err.error?.detail || err.message));
       }
     });

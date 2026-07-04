@@ -54,6 +54,41 @@ def get_genai_client():
         )
 
 
+def clean_prompt_topic(prompt: str) -> str:
+    if not prompt:
+        return ""
+    lines = prompt.splitlines()
+    cleaned_lines = []
+    exclude_keywords = [
+        "card", "1:1 square", "headline_slogan", "additional_text", "placement",
+        "company_name", "graphic_elements", "branding", "slogan", "typography"
+    ]
+    for line in lines:
+        line_strip = line.strip()
+        if not line_strip:
+            continue
+        line_lower = line_strip.lower()
+        if any(line_lower == kw or line_lower.startswith(kw + ":") or line_lower.startswith(kw + "_") for kw in exclude_keywords):
+            continue
+        if "typography" in line_lower or "no brand logos" in line_lower or "sans serif" in line_lower:
+            continue
+        cleaned_lines.append(line_strip)
+    
+    if cleaned_lines:
+        return " ".join(cleaned_lines)
+    return prompt.splitlines()[0] if prompt.splitlines() else prompt
+
+def sanitize_asset_tags(tags: list) -> list:
+    if not tags:
+        return []
+    exclude_tag_keywords = ["overlay", "placement", "http", "gcs", "slogan", "text", "branding", "card", "square", "company", "headline", "graphic"]
+    return [
+        t for t in tags
+        if len(str(t)) < 30
+        and not "_" in str(t)
+        and not any(k in str(t).lower() for k in exclude_tag_keywords)
+    ]
+
 pubsub_broker = PubSubBroker()
 
 def build_system_prompt_override(
@@ -674,9 +709,15 @@ async def generate_campaign_assets(campaign_id: str):
             logger.info(f"Found {len(matched_assets)} matched library assets for composition.")
             
             # Compose Prompt incorporating governor parameters and campaign details
-            composition_details = " \n".join([f"- Use reference {a.category} asset named '{a.name}' (URL: {a.gcs_url}, tags: {a.tags})" for a in matched_assets])
+            clean_composition_details = []
+            for a in matched_assets:
+                sanitized_tags = sanitize_asset_tags(a.tags)
+                clean_composition_details.append(
+                    f"- Use reference {a.category} asset named '{a.name}' (tags: {sanitized_tags})"
+                )
+            composition_details = " \n".join(clean_composition_details)
             base_prompt = (
-                f"Topic: {db_campaign.prompt}\n"
+                f"Topic: {clean_prompt_topic(db_campaign.prompt)}\n"
                 f"Target Persona: {db_campaign.persona} in {db_campaign.subsector}\n"
                 f"Corporate Brand Guidelines compliance enforced.\n"
             )
@@ -684,13 +725,30 @@ async def generate_campaign_assets(campaign_id: str):
                 base_prompt += f"Incorporate the following image assets directly into the composition:\n{composition_details}\n"
             
             # Helper to run Vertex AI Imagen or fallback mock
-            def run_imagen(aspect_ratio: str, width: int, height: int, mock_label: str) -> bytes:
+            def run_imagen(aspect_ratio: str, width: int, height: int, mock_label: str, is_slide_background: bool = False) -> bytes:
+                # Build prompt dynamically per image type
+                if is_slide_background:
+                    prompt_parts = [
+                        "A minimal, premium 16:9 widescreen presentation background. Scene: Soft light pearl-white and warm silver gradient with a subtle geometric grid pattern of thin pale-blue lines suggesting data connectivity and logistics. Very bright, airy, and clean composition ideal for white-background PowerPoint slides. A faint silhouette of commercial vehicles on the distant horizon line.",
+                        "CRITICAL EXCLUSION: Do NOT paint, render, generate, or print ANY letters, numbers, words, characters, slogans, text labels, corporate names, or logo symbols anywhere on the image. The entire layout must be completely clean, text-free, and blank of any typography.",
+                        f"Brand colors: {brand_colors_str}"
+                    ]
+                else:
+                    prompt_parts = [
+                        f"Topic: {clean_prompt_topic(db_campaign.prompt)}",
+                        f"Target Persona: {db_campaign.persona} in {db_campaign.subsector}",
+                        "Corporate Brand Guidelines compliance enforced."
+                    ]
+                    if composition_details:
+                        prompt_parts.append(f"Incorporate the following image assets directly into the composition:\n{composition_details}")
+                
+                dynamic_prompt = f"{mock_label} marketing banner. " + "\n".join(prompt_parts)
                 try:
                     from google.genai import types as genai_types
                     client = get_genai_client()
                     response = client.models.generate_images(
                         model="imagen-4.0-generate-001",
-                        prompt=f"{mock_label} marketing banner. {base_prompt}",
+                        prompt=dynamic_prompt,
                         config=genai_types.GenerateImagesConfig(
                             number_of_images=1,
                             aspect_ratio=aspect_ratio,
@@ -715,8 +773,9 @@ async def generate_campaign_assets(campaign_id: str):
                     draw.rectangle([10, 10, width-10, height-10], outline="#4F46E5", width=2)
                     draw.text((width // 2, 40), f"Imagen composition: {mock_label}", fill="#ffffff", anchor="mm")
                     draw.text((width // 2, height // 2 - 20), f"Size: {width}x{height} | Aspect Ratio: {aspect_ratio}", fill="#cbd5e1", anchor="mm")
-                    draw.text((width // 2, height // 2 + 20), f"Topic: {db_campaign.prompt[:40]}...", fill="#cbd5e1", anchor="mm")
-                    if matched_assets:
+                    if not is_slide_background:
+                        draw.text((width // 2, height // 2 + 20), f"Topic: {db_campaign.prompt[:40]}...", fill="#cbd5e1", anchor="mm")
+                    if matched_assets and not is_slide_background:
                         draw.text((width // 2, height - 40), f"Composed with: {matched_assets[0].name}", fill="#F43F5E", anchor="mm")
                         
                     buf = io.BytesIO()
@@ -735,7 +794,7 @@ async def generate_campaign_assets(campaign_id: str):
             editorial_url = storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/editorial.png", editorial_bytes, "image/png")
             
             logger.info("Generating Slide Background (16:9)...")
-            slide_bytes = run_imagen("16:9", 1408, 768, "PowerPoint Widescreen Background")
+            slide_bytes = run_imagen("16:9", 1408, 768, "PowerPoint Widescreen Background", is_slide_background=True)
             slide_url = storage_broker.upload_binary_artifact(f"campaigns/{campaign_id}/slide_background.png", slide_bytes, "image/png")
             
             logger.info("Generating Content Card (1:1)...")
@@ -809,7 +868,7 @@ async def regenerate_campaign_asset(campaign_id: str, request_data: AssetRegener
             # Describe matched assets in natural language, omitting raw instructions or DB metadata
             descriptions = []
             for a in matched_assets:
-                clean_tags = [t for t in (a.tags or []) if len(t) < 30 and not any(k in t.lower() for k in ["overlay", "placement", "http", "gcs"])]
+                clean_tags = sanitize_asset_tags(a.tags)
                 clean_name = a.name
                 if clean_name:
                     if clean_tags:
@@ -851,36 +910,59 @@ async def regenerate_campaign_asset(campaign_id: str, request_data: AssetRegener
             subsector = db_campaign.subsector or "Trucking & Local"
             persona = db_campaign.persona or "Fleet Safety Manager"
             
-            scene = scene_template.format(
-                prompt_topic=db_campaign.prompt,
-                persona=persona,
-                subsector=subsector
-            )
+            if image_type == "slide_background":
+                scene = scene_template  # No placeholders to format in strict text-free slide template
+            else:
+                scene = scene_template.format(
+                    prompt_topic=clean_prompt_topic(db_campaign.prompt),
+                    persona=persona,
+                    subsector=subsector
+                )
             
             caption_clause = ""
-            if caption_text:
-                caption_clause = (
-                    f" The image must display the text '{caption_text}' clearly visible on a signboard, screen, or vehicle."
-                )
+            if caption_text and image_type != "slide_background":
+                if image_type == "content_card":
+                    caption_clause = (
+                        f" The card must feature a clean, professional typography overlay displaying the short text: '{caption_text}'."
+                    )
+                else:
+                    caption_clause = (
+                        f" The image must display the text '{caption_text}' clearly visible on a signboard, screen, or vehicle."
+                    )
                 
             logo_gcs_url = gov.logo_gcs_url
             company_name = getattr(gov, "company_name", "FleetVid")
             
             # Instruct Imagen to avoid generating any brand logos or symbols to prevent mismatching and messy random logo generations.
             logo_clause = " CRITICAL REQUIREMENT: Do NOT generate or paint any brand logos, corporate symbols, or emblem graphics on the vehicles, screens, or layout overlays. Keep all surfaces clean and free of branding graphics."
-            company_clause = f" It is acceptable to display the company name '{company_name}' in simple black typographic lettering on signboards, vehicles, or screens in the scene."
             
-            # Omit raw hex codes in the prompt to prevent Imagen from writing them as text
-            colors = [c for c in (gov.primary_colors or []) + (gov.secondary_colors or []) if not c.startswith("#")]
-            if colors:
-                brand_colors_str = f"brand colors: {', '.join(colors)}"
+            if image_type == "slide_background":
+                company_clause = ""
+            else:
+                company_clause = f" It is acceptable to display the company name '{company_name}' in simple black typographic lettering on signboards, vehicles, or screens in the scene."
+            
+            # Omit raw hex codes and complex CSS gradients from prompt to prevent them from leaking as text
+            clean_colors = []
+            for c in (gov.primary_colors or []) + (gov.secondary_colors or []):
+                c_str = str(c).strip()
+                if c_str.startswith("#"):
+                    continue
+                if "(" in c_str or ")" in c_str or "," in c_str or "gradient" in c_str.lower() or len(c_str) > 20:
+                    continue
+                clean_colors.append(c_str)
+            if clean_colors:
+                brand_colors_str = f"brand colors: {', '.join(clean_colors)}"
             else:
                 brand_colors_str = "brand colors"
-            base_rules_template = _load_prompt("image_base_rules.txt")
-            base_rules = base_rules_template.format(brand_colors_str=brand_colors_str)
+                
+            if image_type == "slide_background":
+                base_rules = f"Brand colors: {brand_colors_str}\nCRITICAL RULES: All surfaces and layouts must be completely clean and free of text, letters, numbers, and symbols. Absolutely NO text overlays, slogans, or branding letters are permitted on this slide background."
+            else:
+                base_rules_template = _load_prompt("image_base_rules.txt")
+                base_rules = base_rules_template.format(brand_colors_str=brand_colors_str)
             
             original_prompt = f"{scene}{caption_clause}{logo_clause}{company_clause}\n{base_rules}"
-            if composition_details:
+            if composition_details and image_type != "slide_background":
                 original_prompt += f"\nReference assets to incorporate: {composition_details}"
                 
             final_prompt = original_prompt
