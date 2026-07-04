@@ -875,6 +875,7 @@ ${dontsStr}
         console.error('Failed to save brand policies', err);
         this.isSaving = false;
         this.saveStatus = 'error';
+        alert('Failed to save brand governance: ' + (err.error?.detail || err.message));
       }
     });
   }

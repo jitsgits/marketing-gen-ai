@@ -721,6 +721,7 @@ export class WorkspaceComponent implements OnInit {
           this.campaignData[tab.statusKey] = 'failed';
         }
         this.isRegeneratingSingle = false;
+        alert('Image regeneration failed: ' + (err.error?.detail || err.message));
       }
     });
   }
@@ -788,6 +789,7 @@ export class WorkspaceComponent implements OnInit {
           this.campaignData[tab.statusKey] = 'failed';
         }
         this.isRegeneratingSingleText = false;
+        alert('Text regeneration failed: ' + (err.error?.detail || err.message));
       }
     });
   }

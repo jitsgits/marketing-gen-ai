@@ -356,6 +356,13 @@ app.add_middleware(
 @app.post("/api/v1/generate", response_model=CampaignStatus, status_code=status.HTTP_202_ACCEPTED)
 async def generate_content(request: GenerateRequest):
     with tracer.start_as_current_span("api_generate_request") as span:
+        try:
+            from app.guardrails import validate_and_sanitize_prompt
+            request.prompt = validate_and_sanitize_prompt(request.prompt)
+        except ValueError as val_e:
+            logger.warning(f"Campaign prompt rejected by guardrails: {val_e}")
+            raise HTTPException(status_code=400, detail=str(val_e))
+            
         campaign_id = request.campaign_id if request.campaign_id else str(uuid.uuid4())
         span.set_attribute("campaign_id", campaign_id)
         span.set_attribute("personalization.persona", request.personalization_matrix.persona)
@@ -762,6 +769,13 @@ from app.schemas import AssetRegenerateRequest
 
 @app.post("/api/v1/campaigns/{campaign_id}/regenerate-asset")
 async def regenerate_campaign_asset(campaign_id: str, request_data: AssetRegenerateRequest):
+    try:
+        from app.guardrails import validate_and_sanitize_prompt
+        request_data.refinement_prompt = validate_and_sanitize_prompt(request_data.refinement_prompt)
+    except ValueError as val_e:
+        logger.warning(f"Image refinement prompt rejected by guardrails: {val_e}")
+        raise HTTPException(status_code=400, detail=str(val_e))
+        
     image_type = request_data.image_type
     if image_type not in ["blog_hero", "editorial", "slide_background", "content_card"]:
         raise HTTPException(status_code=400, detail="Invalid image_type.")
@@ -1182,6 +1196,13 @@ async def overlay_campaign_logo(campaign_id: str, request_data: LogoOverlayReque
 
 @app.post("/api/v1/campaigns/{campaign_id}/regenerate-text")
 async def regenerate_campaign_text(campaign_id: str, request_data: TextRegenerateRequest):
+    try:
+        from app.guardrails import validate_and_sanitize_prompt
+        request_data.refinement_prompt = validate_and_sanitize_prompt(request_data.refinement_prompt)
+    except ValueError as val_e:
+        logger.warning(f"Text refinement prompt rejected by guardrails: {val_e}")
+        raise HTTPException(status_code=400, detail=str(val_e))
+        
     text_type = request_data.text_type
     if text_type not in ["blog_post", "press_release", "longform"]:
         raise HTTPException(status_code=400, detail="Invalid text_type.")
@@ -1681,6 +1702,30 @@ async def get_brand_governance():
 
 @app.put("/api/v1/settings/brand-governance", response_model=BrandGovernanceResponse)
 async def update_brand_governance(update_data: BrandGovernanceUpdate):
+    try:
+        from app.guardrails import validate_and_sanitize_prompt
+        update_data.company_name = validate_and_sanitize_prompt(update_data.company_name)
+        update_data.company_vertical = validate_and_sanitize_prompt(update_data.company_vertical)
+        update_data.global_tone = validate_and_sanitize_prompt(update_data.global_tone)
+        
+        for pillar in update_data.master_pillars:
+            if isinstance(pillar, dict):
+                if "title" in pillar:
+                    pillar["title"] = validate_and_sanitize_prompt(pillar["title"])
+                if "description" in pillar:
+                    pillar["description"] = validate_and_sanitize_prompt(pillar["description"])
+                    
+        for category, rules in update_data.guardrails.items():
+            if isinstance(rules, list):
+                update_data.guardrails[category] = [validate_and_sanitize_prompt(r) for r in rules]
+                
+        for category, ctas in update_data.cta_library.items():
+            if isinstance(ctas, list):
+                update_data.cta_library[category] = [validate_and_sanitize_prompt(c) for c in ctas]
+    except ValueError as val_e:
+        logger.warning(f"Brand governance update rejected by guardrails: {val_e}")
+        raise HTTPException(status_code=400, detail=str(val_e))
+        
     async with SessionLocalAsync() as session:
         result = await session.execute(
             select(BrandGovernanceConstraint).where(BrandGovernanceConstraint.id == 1)
