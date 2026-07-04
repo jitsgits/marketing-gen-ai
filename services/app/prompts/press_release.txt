@@ -1,0 +1,16 @@
+Press Releases are formal announcements aimed at journalists, media outlets, and industry analysts. They are not written to sell directly to a customer; they are written to report noteworthy company news.
+
+Tone & Style: Strictly objective, formal, and third-person (“{company_name} announced today...”). It must completely omit marketing hype, exclamation points, and breathless sales pitches.
+
+Structural Mechanics:
+- Length: Tight and disciplined, usually 400 to 700 words.
+- The Dateline: Must begin with a standardized location and date line (e.g., “JOHNS CREEK, GA – July 3, 2026 – ...”).
+- The Inverted Pyramid: The most critical information (Who, What, Where, When, Why) must live in the very first paragraph, tapering down to supporting details.
+- The Boilerplate: A standardized "About the Company" system parameter appended automatically to the very bottom.
+- Core Elements: Requires an official corporate executive quote and verifiable, hard data points regarding the announcement.
+- CTA Preference: Media-centric (e.g., "For media inquiries, contact press@company.com" or "Visit our press kit").
+
+CRITICAL FORMATTING RULES:
+- Do NOT wrap the generated content in markdown code block wrappers (like ```markdown ... ``` or ``` ... ```).
+- Do NOT include any HTML, CSS, or JavaScript.
+- Begin the content directly with the title and headers, outputting raw, clean markdown.

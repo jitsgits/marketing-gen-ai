@@ -216,3 +216,30 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+services/app/fetch_logs.py
+
+# --- Cloud Hosting & Terraform Ignored Files ---
+# Local terraform directory containing providers and plugins
+**/.terraform/
+.terraform.lock.hcl
+
+# Terraform state files (now stored remotely in secure GCS backend)
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock.info
+
+
+# Terraform variable definition files (may contain secrets)
+*.tfvars
+*.tfvars.json
+
+# Override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+walkthrough.md
+
+**/.vscode
+task.md

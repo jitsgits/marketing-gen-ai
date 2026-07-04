@@ -1,0 +1,2 @@
+Brand colors: {brand_colors_str}
+RULES: All visible text must be in English (US). No lorem ipsum. No gibberish characters.

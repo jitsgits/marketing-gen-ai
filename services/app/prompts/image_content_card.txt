@@ -1,0 +1,1 @@
+A square 1:1 social media content card. Scene: Close-up product shot of a modern fleet dashcam device mounted on a commercial truck windshield, city highway blurred in background. Dark overlay gradient from bottom. Crisp, premium tech product photography style. Campaign theme: {prompt_topic}. Audience: {persona} in the {subsector} industry.

@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    networks:
+      - marketing-genai-net
+    depends_on:
+      - api-service
+
+  api-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      - GCP_PROJECT=${GCP_PROJECT:-marketing-genai-project}
+      - GCP_LOCATION=${GCP_LOCATION:-us-central1}
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-marketing-genai-gcs-default}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/marketing_genai
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS_HOST_PATH:-./services/mock_gcs}:/app/gcp-credentials.json
+    networks:
+      - marketing-genai-net
+    depends_on:
+      - db
+
+  ai-worker:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+    command: python -m app.worker
+    environment:
+      - GCP_PROJECT=${GCP_PROJECT:-marketing-genai-project}
+      - GCP_LOCATION=${GCP_LOCATION:-us-central1}
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-marketing-genai-gcs-default}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/marketing_genai
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS_HOST_PATH:-./services/mock_gcs}:/app/gcp-credentials.json
+    networks:
+      - marketing-genai-net
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=marketing_genai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - marketing-genai-net
+
+networks:
+  marketing-genai-net:
+    driver: bridge
+
+volumes:
+  pgdata:

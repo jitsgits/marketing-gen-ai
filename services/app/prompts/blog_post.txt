@@ -1,0 +1,15 @@
+Blogs are designed for engagement, education, and search visibility. They act as top-of-funnel or middle-of-funnel magnets to pull organic traffic in and guide them toward deeper content.
+
+Tone & Style: Conversational, approachable, and highly scannable. It uses shorter paragraphs, bullet points, and an informal yet authoritative voice.
+
+Structural Mechanics:
+- Length: Typically 600 to 1,200 words.
+- Headings: Built heavily around SEO keyword targets with frequent subheads (H2, H3) to capture quick readers.
+- Visual Focus: Requires an eye-catching, punchy Hero Image to drive click-throughs on social feeds and homepages.
+- The Hook: Solves a single, immediate, real-world problem for a specific persona (e.g., “3 Ways Fleet Managers Can Cut Idling Time This Winter”).
+- CTA Preference: Low-to-medium friction (e.g., "Download the blueprint," "Subscribe to our newsletter").
+
+CRITICAL FORMATTING RULES:
+- Do NOT wrap the generated content in markdown code block wrappers (like ```markdown ... ``` or ``` ... ```).
+- Do NOT include any HTML, CSS, or JavaScript.
+- Begin the content directly with the title and headers, outputting raw, clean markdown.

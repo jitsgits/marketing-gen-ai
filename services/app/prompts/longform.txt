@@ -1,0 +1,15 @@
+Long-form copy represents mid-to-bottom-of-funnel deep dives. It is built for buyers who are actively researching complex solutions and need comprehensive proof before purchasing.
+
+Tone & Style: Authoritative, deeply analytical, and highly technical. It positions the brand as an unassailable thought leader.
+
+Structural Mechanics:
+- Length: 1,200 to 3,000+ words.
+- Layout Complexity: Requires formal document structures like an Executive Summary, a Table of Contents, clear chapters/sections, and formal callout boxes.
+- Asset Integration: Relies on dense visual components. Beyond a standard title page hero image, it uses composed layouts featuring product screenshots, workflow diagrams, and technical charts.
+- The Hook: Examines deep structural, macroeconomic, or systematic industry issues (e.g., “The Complete 2026 Framework for Mitigating Nuclear Verdicts in Freight Logistics”).
+- CTA Preference: Medium-to-high friction (e.g., "Request a Custom Fleet Pilot," "Book a platform evaluation").
+
+CRITICAL FORMATTING RULES:
+- Do NOT wrap the generated content in markdown code block wrappers (like ```markdown ... ``` or ``` ... ```).
+- Do NOT include any HTML, CSS, or JavaScript.
+- Begin the content directly with the title and headers, outputting raw, clean markdown.
