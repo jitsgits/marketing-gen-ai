@@ -45,9 +45,22 @@ type GenerationState = 'idle' | 'loading' | 'completed' | 'error';
 
           <!-- Section 1: Campaign Metadata -->
           <div class="space-y-3 bg-slate-950/40 border border-slate-800/80 rounded-xl p-4">
-            <h3 class="text-xs font-semibold text-slate-300 uppercase tracking-widest font-mono">
-              1. Campaign Info
-            </h3>
+            <div class="flex justify-between items-center">
+              <h3 class="text-xs font-semibold text-slate-300 uppercase tracking-widest font-mono">
+                1. Campaign Info
+              </h3>
+              <span *ngIf="currentCampaignId" class="text-[9px] text-slate-500 font-mono flex items-center gap-1">
+                ID: {{ currentCampaignId.slice(0, 8) }}...
+                <button
+                  type="button"
+                  (click)="copyCampaignId()"
+                  class="p-0.5 hover:bg-slate-800 rounded text-slate-500 hover:text-slate-200 transition focus:outline-none"
+                  title="Copy Campaign ID for Figma"
+                >
+                  📋
+                </button>
+              </span>
+            </div>
             
             <div class="space-y-1">
               <label for="campaignName" class="text-[10px] text-slate-450 font-semibold uppercase tracking-wider block">Campaign Name</label>
@@ -709,6 +722,14 @@ export class WorkspaceComponent implements OnInit {
         }
         this.isRegeneratingSingle = false;
       }
+    });
+  }
+
+  copyCampaignId(): void {
+    if (!this.currentCampaignId) return;
+    navigator.clipboard.writeText(this.currentCampaignId).then(() => {
+    }).catch(err => {
+      console.error('Could not copy text: ', err);
     });
   }
 

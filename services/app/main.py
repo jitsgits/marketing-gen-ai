@@ -1353,6 +1353,111 @@ async def regenerate_campaign_text(campaign_id: str, request_data: TextRegenerat
         logger.error(f"Failed regenerating text for campaign {campaign_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/v1/campaigns/{campaign_id}/figma-export")
+async def figma_export_campaign(campaign_id: str):
+    try:
+        async with SessionLocalAsync() as session:
+            # 1. Fetch Campaign
+            result = await session.execute(
+                select(Campaign).where(Campaign.campaign_id == campaign_id)
+            )
+            db_campaign = result.scalars().first()
+            if not db_campaign:
+                raise HTTPException(status_code=404, detail="Campaign not found.")
+                
+            # 2. Fetch Brand Governance
+            gov_res = await session.execute(
+                select(BrandGovernanceConstraint).where(BrandGovernanceConstraint.id == 1)
+            )
+            gov = gov_res.scalars().first()
+            company_name = getattr(gov, "company_name", "FleetVid") if gov else "FleetVid"
+            logo_url = getattr(gov, "logo_gcs_url", "") if gov else ""
+            
+            # 3. Read Text Contents
+            storage_broker = StorageBroker()
+            blog_post_content = ""
+            if db_campaign.blog_post_status == "completed" and db_campaign.blog_post_gcs_url:
+                try:
+                    blog_post_content = storage_broker.download_text_artifact(db_campaign.blog_post_gcs_url)
+                except Exception:
+                    pass
+                    
+            press_release_content = ""
+            if db_campaign.press_release_status == "completed" and db_campaign.press_release_gcs_url:
+                try:
+                    press_release_content = storage_broker.download_text_artifact(db_campaign.press_release_gcs_url)
+                except Exception:
+                    pass
+                    
+            longform_content = ""
+            if db_campaign.longform_status == "completed" and db_campaign.longform_gcs_url:
+                try:
+                    longform_content = storage_broker.download_text_artifact(db_campaign.longform_gcs_url)
+                except Exception:
+                    pass
+            
+            # 4. Construct Payload
+            return {
+                "campaign_id": campaign_id,
+                "company_name": company_name,
+                "logo_url": logo_url,
+                "topic": db_campaign.prompt,
+                "persona": db_campaign.persona,
+                "subsector": db_campaign.subsector,
+                "stage": db_campaign.stage,
+                "selected_asset_tags": db_campaign.selected_asset_tags or [],
+                "images": {
+                    "blog_hero": {
+                        "url": db_campaign.blog_hero_gcs_url,
+                        "status": db_campaign.blog_hero_status
+                    },
+                    "editorial": {
+                        "url": db_campaign.editorial_gcs_url,
+                        "status": db_campaign.editorial_status
+                    },
+                    "slide_background": {
+                        "url": db_campaign.slide_background_gcs_url,
+                        "status": db_campaign.slide_background_status
+                    },
+                    "content_card": {
+                        "url": db_campaign.content_card_gcs_url,
+                        "status": db_campaign.content_card_status
+                    }
+                },
+                "documents": {
+                    "docx": {
+                        "url": db_campaign.docx_gcs_url,
+                        "status": db_campaign.stage_status
+                    },
+                    "pptx": {
+                        "url": db_campaign.pptx_gcs_url,
+                        "status": db_campaign.stage_status
+                    }
+                },
+                "texts": {
+                    "blog_post": {
+                        "url": db_campaign.blog_post_gcs_url,
+                        "status": db_campaign.blog_post_status,
+                        "content": blog_post_content
+                    },
+                    "press_release": {
+                        "url": db_campaign.press_release_gcs_url,
+                        "status": db_campaign.press_release_status,
+                        "content": press_release_content
+                    },
+                    "longform": {
+                        "url": db_campaign.longform_gcs_url,
+                        "status": db_campaign.longform_status,
+                        "content": longform_content
+                    }
+                }
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed exporting campaign figma data for {campaign_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/v1/campaigns/{campaign_id}/finalize")
 async def finalize_campaign(campaign_id: str):
     try:

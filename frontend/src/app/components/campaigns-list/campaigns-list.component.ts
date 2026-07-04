@@ -50,9 +50,19 @@ import { CampaignStateService } from '../../services/campaign-state.service';
             <!-- Top Metadata -->
             <div class="space-y-3">
               <div class="flex justify-between items-center gap-2">
-                <span class="text-[10px] text-slate-500 font-mono">
-                  ID: {{ campaign.campaign_id.slice(0, 8) }}...
-                </span>
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] text-slate-500 font-mono">
+                    ID: {{ campaign.campaign_id.slice(0, 8) }}...
+                  </span>
+                  <button
+                    type="button"
+                    (click)="copyCampaignId(campaign.campaign_id, $event)"
+                    class="p-0.5 hover:bg-slate-800 rounded text-slate-500 hover:text-slate-200 transition focus:outline-none"
+                    title="Copy Campaign ID for Figma"
+                  >
+                    📋
+                  </button>
+                </div>
                 
                 <!-- Status Badge -->
                 <span
@@ -191,6 +201,16 @@ export class CampaignsListComponent implements OnInit {
 
   loadCampaign(campaign: CampaignResponse): void {
     this.router.navigate(['/wizard', campaign.campaign_id]);
+  }
+
+  copyCampaignId(campaignId: string, event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
+    navigator.clipboard.writeText(campaignId).then(() => {
+    }).catch(err => {
+      console.error('Could not copy text: ', err);
+    });
   }
 
   formatTimestamp(dateString: string): string {
